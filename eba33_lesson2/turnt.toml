@@ -1,0 +1,1 @@
+command = "bril2json < {filename} | python remove_print.py | bril2txt > /tmp/{filename}; diff {filename} /tmp/{filename}"
