@@ -6,6 +6,7 @@
     - [Syntax](lang/syntax.md)
     - [Well Formedness](lang/wellformed.md)
     - [Core](lang/core.md)
+    - [Static Single Assignment](lang/ssa.md)
     - [Memory](lang/memory.md)
     - [Floating Point](lang/float.md)
 - [Tools](tools/README.md)
@@ -16,3 +17,5 @@
     - [Editor Plugin](tools/plugin.md)
     - [Type Inference](tools/infer.md)
     - [Benchmarks](tools/bench.md)
+    - [OCaml Library](tools/ocaml.md)
+    - [Benchmark Runner](tools/brench.md)
