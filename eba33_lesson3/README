@@ -1,0 +1,6 @@
+Evidence that this optimization works:
+
+I was in a rush so I tested it on the benchmarks which don't require user
+input, which was only sqrt.bril and euclid.bril.
+I also tested it on cse.bril, included in this directory, and it worked!
+Note that this cse.bril example uses the communative property.
