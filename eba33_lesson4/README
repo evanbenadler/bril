@@ -1,0 +1,28 @@
+I implemented a forward datapath analysis for
+integer interval analysis.
+
+It supports all instructions that define integers.
+
+For id and const, the problem is trivial.
+For add and sub, the lower and upper bounds of the ranges
+get added or subtracted together.
+For mul and div, I did a conservative heuristic to avoid some
+of the difficulties regarding the sign of the values.
+For function calls or "id" to function arguments, the range is
+completely unbounded.
+
+The dataflow stuff is a worklist algorithm with fairly obvious choices
+for lattice top value, meet function, and transfer function.
+
+I didn't end up having time to write a general solver, but my plan was to
+create a (forward) dataflow analysis base class which contains a transfer
+and meet function, a top value, and an already implemented worklist function.
+Then each analysis, like the interval analysis, can inherit from the base
+class and define its own functionality.
+
+Testing was limited. I tested on the two benchmarks which don't consume input
+(euclid and sqrt) just for the reason that I only had time to analyze the
+output for a couple benchmarks. Unfortunately, these did not trigger a lot of
+the more interesting capabilities of my analysis.
+I also tested on the file `local.bril` which tests the transfer function on a
+single basic block.

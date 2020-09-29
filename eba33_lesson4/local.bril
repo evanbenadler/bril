@@ -1,0 +1,10 @@
+@main {
+  x0: int = const -2;
+  x1: int = const 4;
+  x2: int = add x0 x1;
+  x3: int = sub x2 x0;
+  x4: int = mul x3 x0;
+  x5: int = div x1 x2;
+  x6: int = id x5;
+}
+
