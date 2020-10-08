@@ -20,11 +20,10 @@ def block_map(blocks):
             # The block has a label. Remove the label but use it for the
             # block's name.
             name = block[0]['label']
-#            block = block[1:]
+            block = block[1:]
         else:
             # Make up a new name for this anonymous block.
             name = fresh('b', by_name)
-            block = [{"label": name}] + block
 
         # Add the block to the mapping.
         by_name[name] = block
@@ -62,7 +61,6 @@ def add_terminators(blocks):
                 # Otherwise, jump to the next block.
                 dest = list(blocks.keys())[i + 1]
                 block.append({'op': 'jmp', 'labels': [dest]})
-
 
 def edges(blocks):
     """Given a block map containing blocks complete with terminators,

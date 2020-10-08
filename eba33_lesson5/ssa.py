@@ -6,6 +6,9 @@ from form_blocks import form_blocks
 import cfg
 from functools import reduce
 
+SSA_DEFAULT = 'SSA_DEFAULT'
+SSA_ENTRY = 'SSA_ENTRY'
+
 def postorder_sort(block, succs, visited):
     visited.add(block)
     l = []
@@ -20,15 +23,16 @@ def find_dominators(fn):
     cfg.add_terminators(blockmap)
     preds, succs = cfg.edges(blockmap)
 
-    sorted_blocks = postorder_sort(list(blockmap.keys())[0], succs, set())
+    entry = list(blockmap.keys())[0]
+    sorted_blocks = postorder_sort(entry, succs, set())
     sorted_blocks.reverse()
 
-    dom = {}
-    new_dom = {}
+    dom = {vertex: set(sorted_blocks) for vertex in sorted_blocks}
+    dom[entry] = {entry}
+    new_dom = dom.copy()
     while True:
         for vertex in sorted_blocks:
-            pred_doms = [new_dom[p].copy() for p in list(filter(lambda x: x in new_dom, preds[vertex]))]
-            temp = reduce(lambda s1, s2: s1 & s2, (pred_doms if pred_doms else [set()]))
+            temp = reduce(lambda s1, s2: s1 & s2, [new_dom[p] for p in ([vertex]+preds[vertex])])
             temp.add(vertex)
             new_dom[vertex] = temp.copy()
         if dom == new_dom:
@@ -81,6 +85,7 @@ def dom_tree_flat(fn):
         domtree[root] = children
     return domtree
 
+# return blocks not strictly dominated by a block, but predecessor is dominated
 def dom_frontier(fn):
     dom = find_dominators(fn)
     blockmap = cfg.block_map(form_blocks(fn['instrs']))
@@ -89,13 +94,13 @@ def dom_frontier(fn):
     
     frontier = {}
     for block in dom.keys():
-        descendants = [b for b in dom.keys() if block in dom[b]]
+        descendants_strict = [b for b in dom.keys() if block in dom[b] and block!=b]
+        descendants = descendants_strict + [block]
         descendant_succs = set()
         for d in descendants:
             for s in succs[d]:
                 descendant_succs.add(s)
-        f = [ds for ds in descendant_succs if ds not in descendants]
-        frontier[block] = f
+        frontier[block] = [ds for ds in descendant_succs if ds not in descendants_strict]
 
     return frontier
 
@@ -126,18 +131,36 @@ def get_oldname(name):
     else:
         return name
 
+# for debugging
+def contains_op(blockmap, op):
+    for b in blockmap.values():
+        for i in b:
+            if i.get('op', '') == op:
+                print(i)
+                return True
+    return False
+
+# adds labels to each block in blockmap
+def add_labels(blockmap):
+    for blockname, instr in blockmap.items():
+        blockmap[blockname] = [{'label': blockname}] + instr
+
 def to_ssa(fn):
     dom = find_dominators(fn)
     blockmap = cfg.block_map(form_blocks(fn['instrs']))
     cfg.add_terminators(blockmap)
+    add_labels(blockmap)
     preds, succs = cfg.edges(blockmap)
     DF = dom_frontier(fn)
     domtree = dom_tree_flat(fn)
+    entry = list(blockmap.keys())[0]
     
     # compute mapping from vars to basic blocks defining them
-    # also, compute a mapping from variables to their types
+    # also, compute mapping from variables and function args to their types
     defs = {}
     types = {}
+    for a in fn.get('args', []):
+        types[a['name']] = a['type']
     for b in blockmap.keys():
         for instr in [i for i in blockmap[b] if 'dest' in i]:
             v = instr['dest']
@@ -146,33 +169,35 @@ def to_ssa(fn):
                 defs[v].add(b)
             else:
                 defs[v] = {b}
-
+    vars_and_args = list(defs.keys()) + [a['name'] for a in fn.get('args', [])]
     # step 1: basic phi insertion
     for v in defs.keys():
         deflist = list(defs[v])
         for d in deflist:
             for block in DF[d]:
                 if not contains_phi(blockmap[block], v):
-                    blockmap[block] = [{"op":"phi", "dest":v, "type": types[v],
-                        "args":[], "labels":[]}] + blockmap[block]
+                    # put phi after the label
+                    blockmap[block] = blockmap[block][0:1] + [{"op":"phi", "dest":v, "type": types[v],
+                        "args":[], "labels":[]}] + blockmap[block][1:]
                 defs[v].add(block)
-                deflist.append(block)
-
+                if block not in deflist:
+                    deflist.append(block)
     # step 2: renaming
-    stack = {v: [] for v in defs.keys()}
-    freshnum = {v: 0 for v in defs.keys()} # helps generate fresh names
+    stack = {v: [] for v in vars_and_args}
+    freshnum = {v: 0 for v in vars_and_args} # helps generate fresh names
+    def rename_var(oldname):
+        newname = oldname + '_SSA_' + str(freshnum[oldname])
+        freshnum[oldname] += 1
+        stack[oldname].append(newname)
+        return newname
     def rename(block):
-        stacksize = {v: 0 for v in defs.keys()} # how many times we pushed to each stack
+        stacksize = {v: 0 for v in vars_and_args} # how many times we pushed to each stack
         for instr in blockmap[block]:
             if instr.get('op','')!='phi' and 'args' in instr:
                 instr['args'] = [stack[arg][-1] for arg in instr['args']]
             if 'dest' in instr:
-                oldname = instr['dest']
-                newname = oldname + '_SSA_' + str(freshnum[oldname])
-                freshnum[oldname] += 1
-                instr['dest'] = newname
-                stack[oldname].append(newname)
-                stacksize[oldname] += 1
+                stacksize[instr['dest']] += 1
+                instr['dest'] = rename_var(instr['dest'])
         for s in succs[block]:
             for p in [i for i in blockmap[s] if i.get('op','')=='phi']:
                 oldname = get_oldname(p['dest'])
@@ -184,18 +209,72 @@ def to_ssa(fn):
         for v, size in stacksize.items():
             for _ in range(size):
                 stack[v].pop()
+    if 'args' in fn:
+        fn['args'] = [{'name': rename_var(a['name']), 'type': a['type']} for a in fn['args']]
     rename(list(blockmap.keys())[0])
+
+    # post-process to expand each phi for each predecessor
+    # if the variable has same oldname as a function argument, use that function arg
+    # otherwise, use a meaningless default variable
+    for blockname, instrs in blockmap.items():
+        for phi in [i for i in instrs if i.get('op','')=='phi']:
+            default = SSA_DEFAULT
+            phi_oldname = get_oldname(phi['dest'])
+            for argname in [a['name'] for a in fn.get('args',[])]:
+                if phi_oldname == get_oldname(argname):
+                    default = argname
+            for pred in [p for p in preds[blockname] if p not in phi['labels']]:
+                phi['labels'].append(pred)
+                phi['args'].append(default)
+            if blockname == entry:
+                phi['labels'].append(SSA_ENTRY)
+                phi['args'].append(default)
+
     new_fn = fn.copy()
-    new_fn['intrs'] = [i for block in blockmap.values() for i in block]
+    new_fn['instrs'] =  [{'label': SSA_ENTRY},
+            {'dest':SSA_DEFAULT,'type':'int','op':'const','value':'0'}
+            ] + [i for block in blockmap.values() for i in block]
     return new_fn
     
+def from_ssa(fn):
+    blockmap = cfg.block_map(form_blocks(fn['instrs']))
+    cfg.add_terminators(blockmap)
+    add_labels(blockmap)
+
+    # For each block, construct a mapping from predecessors to list of
+    # instructions the predecessor needs to execute before entering the block.
+    # Then, add to blockmap and adjust control flow
+    block2pred2instrs = {b: {} for b in blockmap.keys()}
+
+    for blockname, instrs in blockmap.items():
+        for phi in [i for i in instrs if i.get('op', '')=='phi']:
+            for pred, var in zip(phi['labels'], phi['args']):
+                block2pred2instrs[blockname][pred] = block2pred2instrs[blockname].get(pred, []) + [
+                        {'dest': phi['dest'], 'type': phi['type'],
+                        'op':'id', 'args': [var]}]
+    for blockname in block2pred2instrs:
+        for pred, ins in block2pred2instrs[blockname].items():
+            new_blockname = 'SSA_' + pred + '_' + blockname
+            ins = [{'label': new_blockname}] + ins
+            blockmap[new_blockname] = ins
+            ins.append({'op':'jmp', 'labels': [blockname]})
+            terminator = blockmap[pred][-1]
+            terminator['labels'] = [new_blockname if l==blockname else l for
+                    l in terminator['labels']]
+        
+    new_fn = fn.copy()
+    new_fn['instrs'] =  [i for block in blockmap.values() for i in block if i.get('op', '')!='phi']
+    return new_fn
+
 def to_ssa_program(prog):
     new_prog = prog.copy()
     new_prog['functions'] = [to_ssa(fn) for fn in prog['functions']]
     print(json.dumps(new_prog, indent=2, sort_keys=True))
 
-def from_ssa(program):
-    pass
+def from_ssa_program(prog):
+    new_prog = prog.copy()
+    new_prog['functions'] = [from_ssa(fn) for fn in prog['functions']]
+    print(json.dumps(new_prog, indent=2, sort_keys=True))
 
 if __name__ == '__main__':
     prog = json.load(sys.stdin)
