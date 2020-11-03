@@ -1,0 +1,20 @@
+extract = 'total_dyn_inst: (\d+)'
+benchmarks = '../benchmarks/*.bril'
+timeout = 30
+
+[runs.baseline]
+pipeline = [
+    "bril2json",
+    "python ssa.py --tossa",
+    "python ssa.py --fromssa",
+    "brili -p {args}",
+]
+
+[runs.licm]
+pipeline = [
+    "bril2json",
+    "python licm.py",
+    "python ../examples/tdce.py",
+    "brili -p {args}",
+]
+
