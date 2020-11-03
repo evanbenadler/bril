@@ -30,4 +30,4 @@ This chart shows the change in dynamic instruction count between the
 my baseline is because LICM basically is round-trip SSA plus the actual LICM
 optimization. My round-trip SSA performs quite poorly, most likely because I
 don't follow it with any copy propagation or dead code elimination, but this
-chart isolates the effect of LICM.
+chart isolates the effect of LICM. The geometric mean improvement was 0.706.
