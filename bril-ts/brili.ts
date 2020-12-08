@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import * as bril from './bril';
 import {readStdin, unreachable} from './util';
+var fs = require('fs');
+
+var tracefile = '/tmp/briltrace';
+var tracing = false;
 
 /**
  * An interpreter error to print to the console.
@@ -718,6 +722,11 @@ function evalFunc(func: bril.Function, state: State): Value | null {
     let line = func.instrs[i];
     if ('op' in line) {
       // Run an instruction.
+      if (tracing) {
+        fs.appendFileSync(tracefile, func.name + " " + i.toString() + " " + JSON.stringify(line) + "\n", function (err : any, data : any) {
+          if(err) console.log('error', err);
+        });
+      }
       let action = evalInstr(line, state);
 
       // Take the prescribed action.
@@ -776,6 +785,11 @@ function evalFunc(func: bril.Function, state: State): Value | null {
         }
       }
     } else if ('label' in line) {
+        if (tracing) {
+          fs.appendFileSync(tracefile, line.label + " 0 {}\n", function (err : any, data : any) {
+            if(err) console.log('error', err);
+          });
+        } 
       // Update CFG tracking for SSA phi nodes.
       state.lastlabel = state.curlabel;
       state.curlabel = line.label;
@@ -822,7 +836,9 @@ function parseMainArguments(expected: bril.Argument[], args: string[]) : Env {
   return newEnv;
 }
 
-function evalProg(prog: bril.Program) {
+//function evalProg(prog: bril.Program) {
+function evalProg(stdin : any) {
+  let prog = JSON.parse(stdin) as bril.Program;
   let heap = new Heap<Value>()
   let main = findFunc("main", prog.functions);
   if (main === null) {
@@ -834,6 +850,14 @@ function evalProg(prog: bril.Program) {
   let args: string[] = process.argv.slice(2, process.argv.length);
   let profiling = false;
   let pidx = args.indexOf('-p');
+  let tidx = args.indexOf('-t');
+  if (tidx > -1) {
+    tracing = true;
+    fs.writeFile(tracefile, "", function (err : any, data : any) {
+      if(err) console.log('error', err);
+    });
+    args.splice(tidx, 1);
+  }
   if (pidx > -1) {
     profiling = true;
     args.splice(pidx, 1);
@@ -866,8 +890,9 @@ function evalProg(prog: bril.Program) {
 
 async function main() {
   try {
-    let prog = JSON.parse(await readStdin()) as bril.Program;
-    evalProg(prog);
+    //let prog = JSON.parse(await readStdin()) as bril.Program;
+    //evalProg(prog);
+    evalProg(await readStdin());
   }
   catch(e) {
     if (e instanceof BriliError) {
